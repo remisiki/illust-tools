@@ -1,0 +1,7 @@
+/.bsp/
+target/
+*.json
+*.html
+test.sh
+img/
+data/
