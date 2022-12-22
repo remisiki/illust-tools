@@ -7,8 +7,10 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.{Future, Await}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
+import org.json.{JSONObject, JSONArray}
 
-class PixivArtist(val id: Int, var name: String = "")(implicit val session: PixivSession = new PixivSession()) extends Artist with PixivAccount {
+class PixivArtist(val id: Int, var name: String = "")(implicit val session: PixivSession = new PixivSession())
+	extends Artist with Pixiv with PixivAccount {
 
 	lazy val baseUrl = "https://www.pixiv.net/users/"
 
@@ -23,8 +25,8 @@ class PixivArtist(val id: Int, var name: String = "")(implicit val session: Pixi
 	def fetchName(): String = {
 		this.logger.info(s"Fetching name for [${this.id}]...")
 		try {
-			val url = s"${PixivArtist.AJAX_PREFIX}${this.id}"
-			val userInfo = Net.get(url, this.loginHeaders)
+			val url = s"${Pixiv.AJAX_PREFIX}/user/${this.id}"
+			val userInfo = new JSONObject(Net.get(url, this.loginHeaders))
 			this.name = userInfo.getJSONObject("body").getString("name")
 			this.name
 		} catch {
@@ -38,8 +40,8 @@ class PixivArtist(val id: Int, var name: String = "")(implicit val session: Pixi
 	def fetchArtworks(): Vector[PixivArtwork] = {
 		this.logger.info(s"Fetching artworks for [${this.id}]...")
 		try {
-			val url = s"${PixivArtist.AJAX_PREFIX}${this.id}/profile/all"
-			val profileInfo = Net.get(url, this.loginHeaders)
+			val url = s"${Pixiv.AJAX_PREFIX}/user/${this.id}/profile/all"
+			val profileInfo = new JSONObject(Net.get(url, this.loginHeaders))
 			profileInfo
 				.getJSONObject("body")
 				.getJSONObject("illusts")
@@ -58,11 +60,5 @@ class PixivArtist(val id: Int, var name: String = "")(implicit val session: Pixi
 	def toKemono(): KemonoArtist = {
 		new KemonoArtist("fanbox", this.id, this.name)
 	}
-
-}
-
-object PixivArtist {
-
-	val AJAX_PREFIX = "https://www.pixiv.net/ajax/user/"
 
 }

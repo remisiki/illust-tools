@@ -7,7 +7,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Await}
 import scala.util.{Failure, Success}
 
-class FantiaArtist(val id: Int, var name: String = "") extends Artist {
+class FantiaArtist(val id: Int, var name: String = "")
+	extends Artist with Fantia {
 
 	lazy val baseUrl = "https://fantia.jp/fanclubs/"
 

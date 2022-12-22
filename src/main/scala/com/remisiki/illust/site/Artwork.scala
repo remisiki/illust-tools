@@ -12,9 +12,11 @@ trait Artwork {
 
 	def parse(): Unit
 
-	def downloadSync(): Unit
+	def downloadSync(path: String = "./img"): Unit
 
-	def downloadAsync(): Future[Any]
+	def downloadAsync(path: String = "./img"): Future[Any]
+
+	def getInfo(): String
 
 }
 
@@ -47,3 +49,8 @@ object Artwork {
 	}
 
 }
+
+final case class ArtworkNotFoundException(
+	private val message: String = "Invalid post",
+	private val cause: Throwable = None.orNull
+	) extends Exception(message, cause)

@@ -6,20 +6,15 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Await}
 import scala.util.{Failure, Success}
 
-final case class NoSuchArtistTypeException(
-	private val message: String = "Artist type not found",
-	private val cause: Throwable = None.orNull
-	) extends Exception(message, cause)
-
 trait Artist {
 
 	val id: Int
 
 	var name: String
 
-	override def toString(): String
-
 	def fetchName(): String
+
+	def fetchArtworks(): Vector[Artwork]
 
 }
 
@@ -56,3 +51,13 @@ object Artist {
 	}
 
 }
+
+final case class NoSuchArtistTypeException(
+	private val message: String = "Artist type not found",
+	private val cause: Throwable = None.orNull
+	) extends Exception(message, cause)
+
+final case class ArtistNotFoundException(
+	private val message: String = "Invalid artist",
+	private val cause: Throwable = None.orNull
+	) extends Exception(message, cause)

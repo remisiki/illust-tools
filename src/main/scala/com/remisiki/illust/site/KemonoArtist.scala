@@ -6,21 +6,14 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Await}
 import scala.util.{Failure, Success}
-
-final case class ServiceNotAvailableException(
-	private val message: String = "Service not available at kemono",
-	private val cause: Throwable = None.orNull
-	) extends Exception(message, cause)
+import scala.jdk.CollectionConverters._
+import org.json.{JSONObject, JSONArray}
 
 class KemonoArtist(val service: String, val id: Int, var name: String = "")
-	(implicit val pixivSession: PixivSession = new PixivSession()) extends Artist {
+	(implicit val pixivSession: PixivSession = new PixivSession())
+	extends Artist with Kemono {
 
-	lazy val baseUrl = "https://kemono.party/"
-
-	val serviceList = Vector("fanbox", "fantia")
-	if (!serviceList.contains(this.service)) {
-		throw ServiceNotAvailableException(s"Service ${this.service} not available at kemono")
-	}
+	final private val logger = LoggerFactory.getLogger(getClass)
 
 	override def toString(): String = s"Kemono artist ${this.name} (from ${this.service} [${this.id}])"
 
@@ -35,6 +28,22 @@ class KemonoArtist(val service: String, val id: Int, var name: String = "")
 
 	def exists(): Boolean = {
 		Net.ok(this.url)
+	}
+
+	def fetchArtworks(): Vector[KemonoArtwork] = {
+		try {
+			val json = new JSONArray(Net.get(s"${Kemono.API_PREFIX}/${this.service}/user/${this.id}"))
+			(0 until json.length()).toVector.map {
+				i => {
+					new KemonoArtwork(json.getJSONObject(i))
+				}
+			}
+		} catch {
+			case err: Throwable => {
+				this.logger.error(s"Error fetching artworks for ${this}", err)
+				Vector.empty
+			}
+		}
 	}
 
 }
@@ -62,14 +71,16 @@ object KemonoArtist {
 		}
 	}
 
-	def of(artists: Iterable[Artist]): Iterable[KemonoArtist] = {
-		artists.map {
-			x => x match {
-				case a: PixivArtist => a.toKemono()
-				case a: FantiaArtist => a.toKemono()
-				case a => throw ServiceNotAvailableException(s"Service ${a.getClass} not available at kemono")
-			}
+	def of(artist: Artist): KemonoArtist = {
+		artist match {
+			case a: PixivArtist => a.toKemono()
+			case a: FantiaArtist => a.toKemono()
+			case a => throw ServiceNotAvailableException(s"Service ${a.getClass} not available at kemono")
 		}
+	}
+
+	def of(artists: Iterable[Artist]): Iterable[KemonoArtist] = {
+		artists.map { x => this.of(x) }
 	}
 
 }

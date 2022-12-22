@@ -1,6 +1,6 @@
 package com.remisiki.illust.site
 
-import com.remisiki.illust.util.{Net, NetConnectionException}
+import com.remisiki.illust.util.{Net, NetConnectionException, UrlFile, FileUtil}
 import java.time.format.DateTimeFormatter
 import java.time.OffsetDateTime
 import org.json.{JSONObject, JSONArray}
@@ -8,10 +8,11 @@ import org.jsoup.{Jsoup, HttpStatusException}
 import org.slf4j.LoggerFactory
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Future, Await}
-import scala.util.matching.Regex
-import scala.util.matching.Regex.Match
+import java.nio.file.{Paths}
+import scala.concurrent.ExecutionContext.Implicits.global
 
-class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSession()) extends Artwork with PixivAccount {
+class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSession())
+	extends Artwork with Pixiv with PixivAccount {
 
 	final private val logger = LoggerFactory.getLogger(getClass)
 
@@ -42,7 +43,9 @@ class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSe
 	var smallUrl: String = ""
 	var regularUrl: String = ""
 	var originalUrl: String = ""
-	var images: Vector[(String, String)] = Vector.empty
+	var images: Vector[UrlFile] = Vector.empty
+	var zipFile: UrlFile = new UrlFile()
+	var gifDelay: Int = 0
 
 	def this(json: JSONObject)(implicit session: PixivSession) = {
 		this(json.getJSONObject("body").getInt("id"))
@@ -50,8 +53,8 @@ class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSe
 
 	def parse(): Unit = {
 		try {
-			val url = s"${PixivArtwork.AJAX_PREFIX}${this.id}"
-			val artWorkInfo: JSONObject = Net.get(url, this.loginHeaders)
+			val url = s"${Pixiv.AJAX_PREFIX}/illust/${this.id}"
+			val artWorkInfo = new JSONObject(Net.get(url, this.loginHeaders))
 			this.parse(artWorkInfo)
 		} catch {
 			case err: NetConnectionException => {
@@ -91,7 +94,12 @@ class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSe
 				this.smallUrl = urls.optString("small")
 				this.regularUrl = urls.optString("regular")
 				this.originalUrl = urls.optString("original")
-				this.images = PixivArtwork.getOriginalImages(this)
+				this.images = Pixiv.getOriginalImages(this)
+				if (this.isGif()) {
+					val meta = new JSONObject(Net.get(s"${Pixiv.AJAX_PREFIX}/illust/${this.id}/ugoira_meta", this.loginHeaders))
+					this.zipFile = new UrlFile(meta.getJSONObject("body").getString("originalSrc"), headers = this.loginHeaders)
+					this.gifDelay = meta.getJSONObject("body").getJSONArray("frames").getJSONObject(0).getInt("delay")
+				}
 			}
 		} catch {
 			case err: Throwable => {
@@ -100,7 +108,18 @@ class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSe
 		}
 	}
 
-	override def toString(): String = {
+	def isGif(): Boolean = {
+		Pixiv.ORIGINAL_URL_PATTERN.findFirstMatchIn(this.originalUrl) match {
+			case Some(matcher) => {
+				(matcher.group(3) == "ugoira")
+			}
+			case None => false
+		}
+	}
+
+	override def toString(): String = s"Pixiv artwork [${this.id}] from [${this.userId}]"
+
+	def getInfo(): String = {
 		s"""
 		|userId: ${this.userId}
 		|url: ${this.url}
@@ -126,34 +145,43 @@ class PixivArtwork(val id: Int)(implicit val session: PixivSession = new PixivSe
 		""".stripMargin
 	}
 
-	def downloadSync(): Unit = {
-		Net.downloadAllSync(this.images.map(x => x._2), this.loginHeaders, this.images.map(x => x._1), "./img")
-	}
-
-	def downloadAsync(): Future[Any] = {
-		Net.downloadAllAsync(this.images.map(x => x._2), this.loginHeaders, this.images.map(x => x._1), "./img")
-	}
-
-}
-
-object PixivArtwork {
-
-	val AJAX_PREFIX = "https://www.pixiv.net/ajax/illust/"
-	val ORIGINAL_URL_PATTERN = new Regex("""(https://i.pximg.net/img-original/img/\d{4}/\d{2}/\d{2}/\d{2}/\d{2}/\d{2}/)(\d+)_p(\d+)(\.(jpg|jpe|jpeg|png|gif))""")
-	val ORIGINAL_URL_PREFIX = "https://i.pximg.net/img-original/img/"
-
-	def getOriginalImages(p: PixivArtwork): Vector[(String, String)] = {
-		ORIGINAL_URL_PATTERN.findFirstMatchIn(p.originalUrl) match {
-			case Some(matcher: Match) => {
-				val prefix: String = matcher.group(1)
-				val id: String = matcher.group(2)
-				val suffix: String = matcher.group(4)
-				(0 until p.pageCount).toVector.map {i => {
-					val fileName: String = s"${id}_p${i}${suffix}"
-					(fileName, s"${prefix}${fileName}")
-				}}
+	def makeGif(path: String = s"./img/pixiv/${this.id}", deleteAfterMake: Boolean = true): Unit = {
+		if (!this.zipFile.isEmpty()) {
+			this.logger.info(s"Start making GIF for ${this.id}...")
+			try {
+				FileUtil.makeGifFromZip(
+					Paths.get(path, this.zipFile.name).toString,
+					this.gifDelay,
+					Paths.get(path, s"${this.id}.gif").toString,
+					deleteAfterMake
+				)
+				this.logger.info(s"Finish making GIF for ${this.id}")
+			} catch {
+				case err: Throwable => {
+					this.logger.error(s"Error making GIF for ${this.id}", err)
+				}
 			}
-			case None => Vector.empty
+		}
+	}
+
+	def downloadSync(path: String = s"./img/pixiv/${this.id}"): Unit = {
+		Net.downloadAllSync(this.images :+ this.zipFile, path)
+		this.makeGif(path)
+	}
+
+	def downloadAsync(path: String = s"./img/pixiv/${this.id}"): Future[Any] = {
+		if (!this.zipFile.isEmpty()) {
+			Future.sequence {
+				Seq(
+					Net.downloadAllAsync(this.images, path),
+					Future {
+						Net.download(this.zipFile, path)
+						this.makeGif(path)
+					}
+				)
+			}
+		} else {
+			Net.downloadAllAsync(this.images, path)
 		}
 	}
 
